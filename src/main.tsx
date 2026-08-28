@@ -22,9 +22,11 @@ console.error = (...args: any[]) => {
     errString.includes('ZERO_RESULTS') ||
     errString.includes('NOT_FOUND') ||
     errString.includes('is not valid JSON') ||
-    errString.includes('AI Diagnosis failed')
+    errString.includes('AI Diagnosis failed') ||
+    errString.includes('auth/popup-closed-by-user') ||
+    errString.includes('auth/cancelled-popup-request')
   ) {
-    return; // Ignore Maps API internal routing errors and external JSON parsing errors
+    return; // Ignore Maps API internal routing errors, external JSON parsing errors, and voluntary sign-in popup cancellations
   }
   originalConsoleError(...args);
 };

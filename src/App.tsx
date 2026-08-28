@@ -111,12 +111,18 @@ export default function App() {
         return credential.accessToken;
       }
     } catch (error: any) {
-      console.error("Failed to link Google Drive", error);
-      if (error?.code === 'auth/cancelled-popup-request' || error?.code === 'auth/popup-blocked' || error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('popup-blocked')) {
-        setBackupStatusMsg("Google Drive connection failed: Please open this app in a new tab to bypass iframe security limits.");
-      } else {
-        setBackupStatusMsg(`Connection failed: ${error?.message || error}`);
+      if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
+        setBackupStatusMsg("Google sign-in was cancelled.");
+        setTimeout(() => setBackupStatusMsg(null), 2500);
+        return null;
       }
+      if (error?.code === 'auth/popup-blocked' || error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('popup-blocked')) {
+        setBackupStatusMsg("Google Drive connection: Please open this app in a new tab to bypass iframe security limits.");
+      } else {
+        console.warn("Google Drive sign-in notice:", error?.message || error);
+        setBackupStatusMsg(`Connection not completed: ${error?.message || error}`);
+      }
+      setTimeout(() => setBackupStatusMsg(null), 4000);
     }
     return null;
   };
@@ -990,11 +996,16 @@ export default function App() {
       setLoginError(null);
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
-      console.error("Login failed", error);
-      if (error?.code === 'auth/cancelled-popup-request' || error?.code === 'auth/popup-blocked' || error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('popup-blocked')) {
-        setLoginError("Login failed due to browser popup restrictions inside the preview window. Please open this app in a new tab to authenticate successfully.");
+      if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
+        // User voluntarily dismissed the popup
+        setLoginError("Sign-in was cancelled. You can sign in anytime or continue with Demo Mode below.");
+        return;
+      }
+      if (error?.code === 'auth/popup-blocked' || error?.message?.includes('INTERNAL ASSERTION FAILED') || error?.message?.includes('popup-blocked')) {
+        setLoginError("Sign-in popup was blocked by browser security inside the preview frame. Use Demo Mode to explore now, or open the app in a new tab to authenticate.");
       } else {
-        setLoginError(`Login failed: ${error?.message || error}`);
+        console.warn("Sign-in notice:", error?.message || error);
+        setLoginError(`Sign-in was not completed: ${error?.message || error}. You can use Demo Mode below.`);
       }
     }
   };
@@ -1021,7 +1032,7 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center max-w-md mx-auto bg-car-bg shadow-2xl p-6 text-center animate-fade-in">
-        <h1 className="text-3xl font-bold tracking-tighter text-white mb-2">DriveLogicAI</h1>
+        <h1 className="text-3xl font-bold tracking-tighter text-white mb-2">GPS Route Logic</h1>
         <p className="text-xs uppercase tracking-[0.2em] text-white/40 font-mono mb-12">Advanced Vehicle Intelligence</p>
         
         <div className="w-full max-w-sm space-y-4">
@@ -1091,7 +1102,7 @@ export default function App() {
             </div>
           </div>
           <div className="min-w-0 hidden xs:block sm:block">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tighter text-white truncate">DriveLogicAI</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tighter text-white truncate">GPS Route Logic</h1>
             <p className="text-[9px] sm:text-[10px] uppercase tracking-[0.2em] text-white/40 font-mono truncate hidden sm:block">Advanced Vehicle Intelligence</p>
           </div>
         </div>

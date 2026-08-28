@@ -1,5 +1,5 @@
 {
-  "name": "GPS-Route-Logic",
+  "name": "GPS Route Logic",
   "description": "Advanced vehicle intelligence platform featuring real-time voice chat commands for getting GPS dirrections, ELM327 BLE module [user sourced] OBD-II diagnostics, high-fidelity IMU sensor telemetry, and accurate AI-powered health analysis using Gemini.",
   "requestFramePermissions": [
     "geolocation",

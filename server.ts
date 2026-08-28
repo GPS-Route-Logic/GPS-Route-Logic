@@ -25,6 +25,50 @@ async function startServer() {
     }
   });
 
+  // Helper function to generate content with fallback on 503/429/overload
+  async function generateContentWithFallback(params: {
+    primaryModel?: string;
+    fallbackModel?: string;
+    contents: any;
+    config?: any;
+  }) {
+    const primary = params.primaryModel || "gemini-3.7-flash";
+    const fallback = params.fallbackModel || "gemini-2.5-flash";
+
+    try {
+      return await ai.models.generateContent({
+        model: primary,
+        contents: params.contents,
+        config: params.config
+      });
+    } catch (primaryErr: any) {
+      const errMsg = primaryErr?.message || String(primaryErr);
+      const isTemporary = errMsg.includes("503") || 
+                          errMsg.includes("UNAVAILABLE") || 
+                          errMsg.includes("high demand") || 
+                          errMsg.includes("429") || 
+                          errMsg.includes("RESOURCE_EXHAUSTED");
+      
+      console.warn(`Primary model ${primary} failed (${errMsg.substring(0, 100)}...). Attempting fallback ${fallback}...`);
+      
+      try {
+        // Fallback to gemini-2.5-flash (which doesn't support thinkingConfig with high thinking level)
+        const fallbackConfig = params.config ? { ...params.config } : {};
+        if (fallbackConfig.thinkingConfig) {
+          delete fallbackConfig.thinkingConfig;
+        }
+        return await ai.models.generateContent({
+          model: fallback,
+          contents: params.contents,
+          config: fallbackConfig
+        });
+      } catch (fallbackErr: any) {
+        console.error(`Fallback model ${fallback} also failed:`, fallbackErr?.message || fallbackErr);
+        throw primaryErr; // rethrow primary error if both failed
+      }
+    }
+  }
+
   // Gemini API Proxy endpoints to secure the key
   app.get("/api/keytest", (req, res) => {
     res.json({ key: process.env.GEMINI_API_KEY ? "configured" : "missing" });
@@ -33,7 +77,6 @@ async function startServer() {
   app.post("/api/gemini/command", async (req, res) => {
     try {
       const { text, history, contextData } = req.body;
-      const model = "gemini-3.7-flash";
 
       const tools = [
         {
@@ -107,8 +150,9 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       }
       formattedHistory.push({ role: 'user', parts: [{ text }] });
 
-      const response = await ai.models.generateContent({
-        model,
+      const response = await generateContentWithFallback({
+        primaryModel: "gemini-3.7-flash",
+        fallbackModel: "gemini-2.5-flash",
         contents: formattedHistory,
         config: { 
           tools: tools as any,
@@ -119,14 +163,14 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
 
       res.json({ text: response.text, functionCalls: response.functionCalls });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      console.warn("Gemini command endpoint error:", e?.message || e);
+      res.status(500).json({ error: e.message || "Failed to process command" });
     }
   });
 
   app.post("/api/gemini/diagnose", async (req, res) => {
     try {
       const { data, sensorHistory, vehicleModel } = req.body;
-      const model = "gemini-3.7-flash";
       
       const vehicleContext = vehicleModel ? `Vehicle Model: ${vehicleModel}` : `Vehicle Model: Unknown`;
 
@@ -163,8 +207,9 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       
       Keep the tone professional, technical yet accessible, and concise. Use Markdown.`;
 
-      const response = await ai.models.generateContent({
-        model,
+      const response = await generateContentWithFallback({
+        primaryModel: "gemini-3.7-flash",
+        fallbackModel: "gemini-2.5-flash",
         contents: prompt,
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
@@ -173,19 +218,19 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       });
       res.json({ text: response.text });
     } catch (e: any) {
-      console.warn("Gemini diagnosis error:", e.message);
-      res.status(500).json({ error: e.message, text: "AI Diagnosis is currently unavailable." });
+      console.warn("Gemini diagnosis error:", e?.message || e);
+      res.status(500).json({ error: e.message, text: "AI Diagnosis is currently unavailable due to high demand. Please try again shortly." });
     }
   });
 
   app.post("/api/gemini/dtc", async (req, res) => {
     try {
       const { code } = req.body;
-      const model = "gemini-3.7-flash";
       const prompt = `You are an expert automotive diagnostics AI. Provide a concise, plain English explanation of the OBD-II Diagnostic Trouble Code (DTC) ${code}. Include the likely causes and recommended actions. Keep the response under 150 words.`;
 
-      const response = await ai.models.generateContent({
-        model,
+      const response = await generateContentWithFallback({
+        primaryModel: "gemini-3.7-flash",
+        fallbackModel: "gemini-2.5-flash",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }]
@@ -193,7 +238,7 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       });
       res.json({ text: response.text });
     } catch (e: any) {
-      console.warn("Gemini DTC error:", e.message);
+      console.warn("Gemini DTC error:", e?.message || e);
       res.status(500).json({ error: e.message, text: null });
     }
   });
@@ -203,7 +248,6 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       const { trips } = req.body;
       if (!trips || trips.length < 2) return res.json({ text: "Not enough trip data for recommendations." });
       
-      const model = "gemini-3.7-flash";
       const tripSummary = trips.map((t: any) => ({
         damage: t.averageDamageScore,
         distance: t.distance,
@@ -215,8 +259,9 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       
       Also, provide 1-3 proactive alerts for upcoming harsh driving conditions or inefficient routes based on this data. Use Markdown.`;
 
-      const response = await ai.models.generateContent({
-        model,
+      const response = await generateContentWithFallback({
+        primaryModel: "gemini-3.7-flash",
+        fallbackModel: "gemini-2.5-flash",
         contents: prompt,
         config: {
           tools: [{ googleMaps: {} }]
@@ -224,7 +269,7 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       });
       res.json({ text: response.text });
     } catch (e: any) {
-      console.warn("Gemini route error:", e.message);
+      console.warn("Gemini route error:", e?.message || e);
       res.status(500).json({ error: e.message, text: "Route recommendations are currently unavailable." });
     }
   });
@@ -282,15 +327,8 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       }
     });
 
-    try {
-      // Fast ping to check API key billing status
-      await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: "ping"
-      });
-    } catch (e: any) {
-      console.error("API Key check failed:", e.message);
-      clientWs.send(JSON.stringify({ error: "API Error: " + (e.message || "Credits depleted.") }));
+    if (!apiKey) {
+      clientWs.send(JSON.stringify({ error: "Gemini API Key is not configured." }));
       clientWs.close();
       return;
     }
@@ -305,7 +343,7 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
           },
           outputAudioTranscription: {},
           inputAudioTranscription: {},
-          systemInstruction: { parts: [{ text: "You are Drive-Logic, an expert automotive diagnostics AI and automotive route optimisation AI. Your very first message must ALWAYS be EXACTLY: 'Hi, I'm Drive-Logic! How can I assist you today?'. You speak with an English woman's accent. You give driving directions in real-time on a gps map. When possible: recommend alternate routes based on logged trip data, obd2 data and damage scores. You also diagnose vehicles using trip logs and obd2 live data with fault codes. Analyse the provided OBD-II sensor data and give a concise, actionable report: identify any anomalies, likely causes, and recommended actions. Use plain English, avoid jargon, and keep the response under 300 words. Use trip logs in conjunction with OBD2 data and stored historical data of the user combined with web data to diagnose the vehicle. Parse all forums, websites and data at your disposal. Given historical route data including damage scores and distances, recommend the best route and explain why briefly. You will always: Use short and concise answers yes and no when possible. Complete request within a 99% accuracy." }] },
+          systemInstruction: { parts: [{ text: "You are GPS Route Logic, an expert automotive diagnostics AI and automotive route optimisation AI. Your very first message must ALWAYS be EXACTLY: 'Hi, I\\'m GPS Route Logic! How can I assist you today?'. You speak with an English woman's accent. You give driving directions in real-time on a gps map. When possible: recommend alternate routes based on logged trip data, obd2 data and damage scores. You also diagnose vehicles using trip logs and obd2 live data with fault codes. Analyse the provided OBD-II sensor data and give a concise, actionable report: identify any anomalies, likely causes, and recommended actions. Use plain English, avoid jargon, and keep the response under 300 words. Use trip logs in conjunction with OBD2 data and stored historical data of the user combined with web data to diagnose the vehicle. Parse all forums, websites and data at your disposal. Given historical route data including damage scores and distances, recommend the best route and explain why briefly. You will always: Use short and concise answers yes and no when possible. Complete request within a 99% accuracy." }] },
           tools: [
             {
               functionDeclarations: [

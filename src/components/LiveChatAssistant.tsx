@@ -339,6 +339,8 @@ const LiveChatAssistant = forwardRef<LiveChatAssistantHandle, any>(({
           let errorText = msg.error;
           if (errorText.includes("RESOURCE_EXHAUSTED") || errorText.includes("prepayment credits")) {
             errorText = "Your API Key has run out of prepaid credits. Add balance in Google AI Studio to continue.";
+          } else if (errorText.includes("503") || errorText.includes("UNAVAILABLE") || errorText.includes("high demand") || errorText.includes("experiencing high demand")) {
+            errorText = "The AI voice service is experiencing temporary high demand. Please try again in a few seconds.";
           } else if (errorText.includes("{")) {
             try {
               const parsed = JSON.parse(errorText.replace("API Error: ", ""));
