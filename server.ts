@@ -32,8 +32,8 @@ async function startServer() {
     contents: any;
     config?: any;
   }) {
-    const primary = params.primaryModel || "gemini-3.7-flash";
-    const fallback = params.fallbackModel || "gemini-2.5-flash";
+    const primary = params.primaryModel || "gemini-3.6-flash";
+    const fallback = params.fallbackModel || "gemini-3.1-flash";
 
     try {
       return await ai.models.generateContent({
@@ -125,12 +125,13 @@ async function startServer() {
         { googleSearch: {} }
       ];
 
-      const systemInstruction = `You are an expert automotive diagnostics AI and automotive route optimisation AI. You give driving directions in real-time on a gps map.
+      const systemInstruction = `You are GPS Route Logic, an expert automotive diagnostics AI and automotive route optimisation AI. You give driving directions in real-time on a gps map. Provide real-time route suggestions based on local reports, emergency calls, user data and weather conditions (use Google Search if needed).
 When possible: recommend alternate routes based on logged trip data, obd2 data and damage scores.
 You also diagnose vehicles using trip logs and obd2 live data with fault codes.
-Analyse the provided OBD-II sensor data and give a concise, actionable report: identify any anomalies, likely causes, and recommended actions. Use plain English, avoid jargon, and keep the response under 300 words.
-Use trip logs in conjunction with OBD2 data and stored historical data of the user combined with web data to diagnose the vehicle. Parse all forums, websites and data at your disposal.
-Given historical route data including damage scores and distances, recommend the best route and explain why briefly (under 150 words).
+Analyse the provided OBD-II sensor data and give a concise, actionable report: identify any anomalies, likely causes, and recommended actions.
+Keep all responses EXTREMELY short and concise based on factual findings. Avoid jargon and filler words. Limit responses to a few short sentences.
+Use trip logs in conjunction with OBD2 data and stored historical data of the user combined with web data to diagnose the vehicle.
+Given historical route data including damage scores and distances, recommend the best route and explain why briefly.
 You will always: Use short and concise answers yes and no when possible. Do NOT introduce yourself or use any intro greeting. Complete request within a 99% accuracy.
 You can help the user change tabs, set navigation, diagnose the vehicle, and toggle recording.
 Vehicle Model: ${contextData?.vehicleModel || 'Unknown'}.
@@ -151,8 +152,8 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       formattedHistory.push({ role: 'user', parts: [{ text }] });
 
       const response = await generateContentWithFallback({
-        primaryModel: "gemini-3.7-flash",
-        fallbackModel: "gemini-2.5-flash",
+        primaryModel: "gemini-3.6-flash",
+        fallbackModel: "gemini-3.1-flash",
         contents: formattedHistory,
         config: { 
           tools: tools as any,
@@ -208,8 +209,8 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       Keep the tone professional, technical yet accessible, and concise. Use Markdown.`;
 
       const response = await generateContentWithFallback({
-        primaryModel: "gemini-3.7-flash",
-        fallbackModel: "gemini-2.5-flash",
+        primaryModel: "gemini-3.6-flash",
+        fallbackModel: "gemini-3.1-flash",
         contents: prompt,
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
@@ -229,8 +230,8 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       const prompt = `You are an expert automotive diagnostics AI. Provide a concise, plain English explanation of the OBD-II Diagnostic Trouble Code (DTC) ${code}. Include the likely causes and recommended actions. Keep the response under 150 words.`;
 
       const response = await generateContentWithFallback({
-        primaryModel: "gemini-3.7-flash",
-        fallbackModel: "gemini-2.5-flash",
+        primaryModel: "gemini-3.6-flash",
+        fallbackModel: "gemini-3.1-flash",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }]
@@ -260,8 +261,8 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       Also, provide 1-3 proactive alerts for upcoming harsh driving conditions or inefficient routes based on this data. Use Markdown.`;
 
       const response = await generateContentWithFallback({
-        primaryModel: "gemini-3.7-flash",
-        fallbackModel: "gemini-2.5-flash",
+        primaryModel: "gemini-3.6-flash",
+        fallbackModel: "gemini-3.1-flash",
         contents: prompt,
         config: {
           tools: [{ googleMaps: {} }]
@@ -271,6 +272,81 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
     } catch (e: any) {
       console.warn("Gemini route error:", e?.message || e);
       res.status(500).json({ error: e.message, text: "Route recommendations are currently unavailable." });
+    }
+  });
+
+  app.post("/api/gemini/chat", async (req, res) => {
+    try {
+      const { message, history = [], previousInteractionId, useAntigravity, useSearch, useMaps, modelType, role } = req.body;
+      
+      const tools = [];
+      if (useSearch) tools.push({ googleSearch: {} });
+      if (useMaps) tools.push({ googleMaps: {} });
+      
+      let systemInstruction = "You are an AI assistant. Help the user with vehicle diagnostics, routes, and general inquiries.";
+      if (role === 'Mechanic') {
+        systemInstruction = "You are an expert mechanic AI. Provide highly technical and precise vehicle diagnostics, explain DTCs, and recommend specific maintenance or repair actions.";
+      } else if (role === 'Navigator') {
+        systemInstruction = "You are a professional route navigator. Focus on providing route optimizations, GPS directions, traffic avoidance, and trip planning.";
+      }
+
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Transfer-Encoding', 'chunked');
+
+      if (useAntigravity) {
+        const interaction = await ai.interactions.create({
+          agent: "antigravity-preview-05-2026",
+          input: message,
+          previous_interaction_id: previousInteractionId,
+          environment: "remote",
+          store: true,
+        }, { timeout: 300000 });
+        
+        if (interaction.id) {
+          res.setHeader('X-Interaction-Id', interaction.id);
+        }
+        
+        let fullOutput = "";
+        for (const step of interaction.steps || []) {
+          if (step.type === 'model_output') {
+            const textContent = step.content?.find((c: any) => c.type === 'text');
+            if (textContent && textContent.text) {
+              fullOutput += textContent.text;
+            }
+          }
+        }
+        res.write(fullOutput);
+        res.end();
+      } else {
+        const formattedHistory = history.map((msg: any) => ({
+           role: msg.role === 'ai' ? 'model' : 'user',
+           parts: [{ text: msg.text }]
+        }));
+        
+        if (formattedHistory.length > 0 && formattedHistory[0].role === 'model') {
+           formattedHistory.shift(); 
+        }
+
+        const responseStream = await ai.models.generateContentStream({
+          model: modelType || "gemini-3.5-flash",
+          contents: [...formattedHistory, { role: 'user', parts: [{ text: message }] }],
+          config: {
+            systemInstruction: systemInstruction,
+            tools: tools.length > 0 ? tools as any : undefined,
+          }
+        });
+        
+        for await (const chunk of responseStream) {
+          if (chunk.text) {
+            res.write(chunk.text);
+          }
+        }
+        res.end();
+      }
+    } catch (err: any) {
+      console.error("Chat API error:", err);
+      res.write(`Error: ${err.message}`);
+      res.end();
     }
   });
 
@@ -335,15 +411,13 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
 
     try {
       const connectPromise = ai.live.connect({
-        model: "gemini-3.1-flash-live-preview",
+        model: "gemini-2.5-flash-native-audio-latest",
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
           },
-          outputAudioTranscription: {},
-          inputAudioTranscription: {},
-          systemInstruction: { parts: [{ text: "You are GPS Route Logic, an expert automotive diagnostics AI and automotive route optimisation AI. Your very first message must ALWAYS be EXACTLY: 'Hi, I\\'m GPS Route Logic! How can I assist you today?'. You speak with an English woman's accent. You give driving directions in real-time on a gps map. When possible: recommend alternate routes based on logged trip data, obd2 data and damage scores. You also diagnose vehicles using trip logs and obd2 live data with fault codes. Analyse the provided OBD-II sensor data and give a concise, actionable report: identify any anomalies, likely causes, and recommended actions. Use plain English, avoid jargon, and keep the response under 300 words. Use trip logs in conjunction with OBD2 data and stored historical data of the user combined with web data to diagnose the vehicle. Parse all forums, websites and data at your disposal. Given historical route data including damage scores and distances, recommend the best route and explain why briefly. You will always: Use short and concise answers yes and no when possible. Complete request within a 99% accuracy." }] },
+          systemInstruction: { parts: [{ text: "You are GPS Route Logic, an expert automotive diagnostics AI and automotive route optimisation AI. Your very first message must ALWAYS be EXACTLY: 'Hi, I\\'m GPS Route Logic! How can I assist you today?'. You speak with an English woman's accent. Keep all responses EXTREMELY short, concise, and factual. Do not use filler words. You give driving directions in real-time on a gps map. Provide real-time route suggestions based on local reports, emergency calls, user data and weather conditions (use Google Search). When possible: recommend alternate routes based on logged trip data, obd2 data and damage scores. You also diagnose vehicles using trip logs and obd2 live data with fault codes. Analyse the provided OBD-II sensor data and give a concise, actionable report: identify any anomalies, likely causes, and recommended actions. Use plain English, avoid jargon, and limit responses to a few short sentences. Use trip logs in conjunction with OBD2 data and stored historical data of the user combined with web data to diagnose the vehicle. Given historical route data including damage scores and distances, recommend the best route and explain why briefly. You will always: Use short and concise answers yes and no when possible. Complete request within a 99% accuracy." }] },
           tools: [
             {
               functionDeclarations: [
@@ -433,7 +507,7 @@ When they say "Start recording" or "Stop recording", use the toggleRecording too
       });
 
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error("Connection to Gemini Live API timed out (credits may be depleted).")), 5000);
+        setTimeout(() => reject(new Error("Connection to Gemini Live API timed out (credits may be depleted).")), 60000);
       });
 
       session = await Promise.race([connectPromise, timeoutPromise]) as any;

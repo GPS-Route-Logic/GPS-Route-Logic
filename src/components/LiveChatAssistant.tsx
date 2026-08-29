@@ -227,13 +227,13 @@ const LiveChatAssistant = forwardRef<LiveChatAssistantHandle, any>(({
         const current = event.resultIndex;
         const transcript = event.results[current][0].transcript.toLowerCase();
         
-        if (transcript.includes('hey drive logic') || transcript.includes('hey drivelogic') || transcript.includes('hey drive-logic')) {
+        if (transcript.includes('hey gps route logic') || transcript.includes('hey gpsroutelogic') || transcript.includes('hey gps-route-logic')) {
           let commandParts = transcript.split('hey drive-logic');
           if (commandParts.length === 1) {
             commandParts = transcript.split('hey drive logic');
           }
           if (commandParts.length === 1) {
-            commandParts = transcript.split('hey drivelogic');
+            commandParts = transcript.split('hey gpsroutelogic');
           }
           const command = commandParts[commandParts.length - 1].trim();
           

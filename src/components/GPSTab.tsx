@@ -99,9 +99,9 @@ const darkMapStyles = [
 ];
 
 const MOCK_SPEED_TRAPS = [
-  { id: '1', lat: 37.7749, lng: -122.4194, reportedAt: Date.now() - 1000 * 60 * 15 },
-  { id: '2', lat: 37.7858, lng: -122.4064, reportedAt: Date.now() - 1000 * 60 * 45 },
-  { id: '3', lat: 37.7694, lng: -122.4862, reportedAt: Date.now() - 1000 * 60 * 120 },
+  { id: '1', lat: 42.1065, lng: -75.9526, reportedAt: Date.now() - 1000 * 60 * 15 },
+  { id: '2', lat: 42.1158, lng: -75.9464, reportedAt: Date.now() - 1000 * 60 * 45 },
+  { id: '3', lat: 42.0994, lng: -75.9662, reportedAt: Date.now() - 1000 * 60 * 120 },
 ];
 
 function Directions({
@@ -318,7 +318,7 @@ export default function GPSTab({ isRecording, trips, navigation, setNavigation, 
       const current = event.resultIndex;
       const transcript = event.results[current][0].transcript.toLowerCase();
       
-      if (transcript.includes('hey drive logic') || transcript.includes('hey drivelogic') || transcript.includes('hey drive-logic')) {
+      if (transcript.includes('hey gps route logic') || transcript.includes('hey gpsroutelogic') || transcript.includes('hey gps-route-logic')) {
         setIsAwake(true);
         if (awakeTimeoutRef.current) clearTimeout(awakeTimeoutRef.current);
         awakeTimeoutRef.current = setTimeout(() => setIsAwake(false), 8000);
@@ -328,7 +328,7 @@ export default function GPSTab({ isRecording, trips, navigation, setNavigation, 
           commandParts = transcript.split('hey drive logic');
         }
         if (commandParts.length === 1) {
-          commandParts = transcript.split('hey drivelogic');
+          commandParts = transcript.split('hey gpsroutelogic');
         }
         const command = commandParts[commandParts.length - 1].trim();
         
@@ -408,7 +408,7 @@ export default function GPSTab({ isRecording, trips, navigation, setNavigation, 
       },
       (err) => {
         console.warn("Geolocation failed or denied, using fallback coordinates:", err);
-        const fallbackPos = { lat: 37.7749, lng: -122.4194 };
+        const fallbackPos = { lat: 42.1065, lng: -75.9526 };
         setLocation(fallbackPos);
         setAccuracy(100);
       },
@@ -586,7 +586,7 @@ export default function GPSTab({ isRecording, trips, navigation, setNavigation, 
             </div>
 
             <Map
-              defaultCenter={location || { lat: 37.7749, lng: -122.4194 }}
+              defaultCenter={location || { lat: 42.1065, lng: -75.9526 }}
               defaultZoom={15}
               gestureHandling={'greedy'}
               disableDefaultUI={true}

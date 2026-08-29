@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, Gauge, Map as MapIcon, History, Play, Square, BrainCircuit, AlertTriangle, ChevronRight, Settings, X, Key, Wrench, AlertCircle } from 'lucide-react';
+import { Activity, Gauge, Map as MapIcon, History, Play, Square, BrainCircuit, AlertTriangle, ChevronRight, Settings, X, Key, Wrench, AlertCircle, CreditCard } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { OBDData, Trip, DamagePoint, TripEvent, SensorPoint, NavigationState, PostCommandActions } from './types';
 import { cn } from './lib/utils';
@@ -13,7 +13,9 @@ import DamageLogTab from './components/DamageLogTab';
 import GPSTab from './components/GPSTab';
 import FloatingMap from './components/FloatingMap';
 import LiveChatAssistant, { LiveChatAssistantHandle } from './components/LiveChatAssistant';
+import { AIChatbot } from './components/AIChatbot';
 import MaintenanceTab from './components/MaintenanceTab';
+import SubscriptionTab from './components/SubscriptionTab';
 import { runAIDiagnosis } from './services/geminiService';
 import { MaintenanceTask } from './types';
 import { APIProvider } from '@vis.gl/react-google-maps';
@@ -26,11 +28,35 @@ import { Cloud, CloudUpload, HardDrive, RotateCw, Trash2, FolderSync, Mic } from
 
 const DEFAULT_MAPS_KEY = "AIzaSyDX-VRPvfH-AzKUwmtu1DQ9_vzDn4y2f9E";
 
+const fetchWeather = async (lat: number, lng: number): Promise<string> => {
+  try {
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&temperature_unit=fahrenheit`);
+    const data = await res.json();
+    if (data.current_weather) {
+      const { temperature, weathercode } = data.current_weather;
+      const getWeatherDescription = (code: number) => {
+        if (code === 0) return 'Clear';
+        if (code <= 3) return 'Partly Cloudy';
+        if (code <= 49) return 'Fog';
+        if (code <= 69) return 'Rain';
+        if (code <= 79) return 'Snow';
+        if (code <= 99) return 'Thunderstorm';
+        return 'Unknown';
+      };
+      return `${Math.round(temperature)}°F, ${getWeatherDescription(weathercode)}`;
+    }
+  } catch (err) {
+    console.error("Failed to fetch weather", err);
+  }
+  return 'Weather unavailable';
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const chatAssistantRef = useRef<LiveChatAssistantHandle>(null);
-  const [activeTab, setActiveTab] = useState<'obd' | 'damage' | 'gps' | 'maintenance'>('obd');
+  const [activeTab, setActiveTab] = useState<'obd' | 'damage' | 'gps' | 'maintenance' | 'subscription'>('obd');
+  const [isChatbotOpen, setIsChatbotOpen] = useState(false);
   const [obdData, setObdData] = useState<OBDData>({
     rpm: 0,
     speed: 0,
@@ -50,7 +76,7 @@ export default function App() {
     timestamp: Date.now(),
   });
   const [navigation, setNavigation] = useState<NavigationState>({
-    from: '',
+    from: '420 Main St, Binghamton, NY',
     to: '',
     isActive: true,
   });
@@ -61,6 +87,8 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [isRecording, setIsRecording] = useState(false);
+  const [showTripSummary, setShowTripSummary] = useState(false);
+  const [completedTripSummary, setCompletedTripSummary] = useState<Trip | null>(null);
   const [currentTrip, setCurrentTrip] = useState<Partial<Trip> | null>(null);
   const [showSettings, setShowSettings] = useState(false);
     const [sensorHistory, setSensorHistory] = useState<SensorPoint[]>([]);
@@ -165,7 +193,7 @@ export default function App() {
         timestamp: Date.now(),
         mileage: totalMileage,
       };
-      const name = `drivelogic_all_backup_${new Date().toISOString().slice(0, 10)}_${Date.now()}.json`;
+      const name = `gpsroutelogic_all_backup_${new Date().toISOString().slice(0, 10)}_${Date.now()}.json`;
       await createDriveFile(token, name, 'application/json', JSON.stringify(backupData, null, 2));
       setBackupStatusMsg("Backup created successfully!");
       loadDriveBackups(token);
@@ -471,9 +499,9 @@ export default function App() {
             createdAt: Date.now(),
             updatedAt: Date.now(),
             trips: trips
-          }, { merge: true }).catch(console.error);
+          }, { merge: true }).catch(err2 => handleFirestoreError(err2, OperationType.WRITE, 'users'));
         } else {
-          console.error("Failed to sync trips to Firestore", err);
+          handleFirestoreError(err, OperationType.UPDATE, 'users');
         }
       });
     }
@@ -489,28 +517,54 @@ export default function App() {
 
   const startTrip = () => {
     setIsRecording(true);
-    setCurrentTrip({
+    const newTrip: Partial<Trip> = {
       id: Math.random().toString(36).substr(2, 9),
       startTime: Date.now(),
       waypoints: [],
       events: [],
       damageHistory: [],
       distance: 0,
-    });
+    };
+    setCurrentTrip(newTrip as Trip);
+    
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        const weather = await fetchWeather(pos.coords.latitude, pos.coords.longitude);
+        setCurrentTrip(prev => prev ? { ...prev, startWeather: weather } : null);
+      }, () => {}, { timeout: 10000 });
+    }
   };
 
-  const stopTrip = () => {
+  const stopTrip = async () => {
     if (!currentTrip) return;
+    
+    let endWeather = 'Weather unavailable';
+    if (currentTrip.waypoints && currentTrip.waypoints.length > 0) {
+      const lastWp = currentTrip.waypoints[currentTrip.waypoints.length - 1];
+      endWeather = await fetchWeather(lastWp.lat, lastWp.lng);
+    } else if (navigator.geolocation) {
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
+        });
+        endWeather = await fetchWeather(pos.coords.latitude, pos.coords.longitude);
+      } catch (e) {
+        // Ignore
+      }
+    }
     
     const finishedTrip: Trip = {
       ...currentTrip as Trip,
       endTime: Date.now(),
       averageDamageScore: (currentTrip.damageHistory?.reduce((acc, p) => acc + p.score, 0) || 0) / (currentTrip.damageHistory?.length || 1),
+      endWeather
     };
 
     setTrips(prev => [finishedTrip, ...prev]);
     setIsRecording(false);
     setCurrentTrip(null);
+    setCompletedTripSummary(finishedTrip);
+    setShowTripSummary(true);
   };
 
   const tabs = [
@@ -518,6 +572,7 @@ export default function App() {
     { id: 'damage', label: 'Damage Log', icon: Activity },
     { id: 'gps', label: 'GPS Routes', icon: MapIcon },
     { id: 'maintenance', label: 'Maintenance', icon: Wrench },
+    { id: 'subscription', label: 'Upgrade', icon: CreditCard },
   ] as const;
 
   // Real Sensor Collection (Accel & Gyro)
@@ -842,27 +897,36 @@ export default function App() {
       processQueue();
     };
 
-    queueCommand('ATZ');
-    queueCommand('ATE0');
-    queueCommand('ATL0');
-    queueCommand('ATH0');
-    queueCommand('ATSP0');
+      // ELM327 Initial Setup for 1996+ Manufacturer Protocols
+      queueCommand('ATZ');    // Reset
+      queueCommand('ATE0');   // Echo off
+      queueCommand('ATL0');   // Linefeeds off
+      queueCommand('ATH0');   // Headers off
+      queueCommand('ATAT1');  // Adaptive timing on
+      queueCommand('ATSP0');  // Auto protocol (J1850 PWM/VPW, ISO9141, KWP2000, CAN)
+      queueCommand('ATDP');   // Describe Protocol
 
-    const pollInterval = setInterval(() => {
-      if (!isPollingActive) {
-        clearInterval(pollInterval);
-        return;
-      }
-      if (commandQueue.length < 3) {
-        queueCommand('010C');
-        queueCommand('010D');
-        queueCommand('0105');
-        if (Math.random() > 0.8) {
-          queueCommand('0101');
-          queueCommand('03');
+      // Polling Loop
+      const pollInterval = setInterval(() => {
+        if (!isPollingActive) {
+          clearInterval(pollInterval);
+          return;
         }
-      }
-    }, 1000);
+        if (commandQueue.length < 3) {
+          queueCommand('010C');
+          queueCommand('010D');
+          queueCommand('0105');
+          queueCommand('0104');
+          queueCommand('0111');
+          queueCommand('ATRV');
+          if (Math.random() > 0.8) {
+            queueCommand('0101');
+            queueCommand('03');
+            queueCommand('012F'); // Fuel Level
+            queueCommand('015C'); // Engine Oil Temp
+          }
+        }
+      }, 1000);
   };
 
   const startOBDPoll = async (writeChar: BluetoothRemoteGATTCharacteristic, notifyChar: BluetoothRemoteGATTCharacteristic) => {
@@ -920,12 +984,14 @@ export default function App() {
       processQueue();
     };
 
-    // ELM327 Initial Setup
+    // ELM327 Initial Setup for 1996+ Manufacturer Protocols
     queueCommand('ATZ');    // Reset
     queueCommand('ATE0');   // Echo off
     queueCommand('ATL0');   // Linefeeds off
     queueCommand('ATH0');   // Headers off
-    queueCommand('ATSP0');  // Auto protocol
+    queueCommand('ATAT1');  // Adaptive timing auto
+    queueCommand('ATSP0');  // Auto protocol (covers 1996+ CAN, KWP, ISO, VPW, PWM)
+    queueCommand('ATDP');   // Describe active protocol
 
     // Polling Loop
     const pollInterval = setInterval(() => {
@@ -944,10 +1010,13 @@ export default function App() {
         queueCommand('0111'); // Throttle
         queueCommand('ATRV'); // Voltage
         
-        // Poll readiness and DTCs less frequently
+        // Poll readiness, DTCs, and extended standard PIDs less frequently
         if (Math.random() > 0.9) {
-          queueCommand('0101'); // Readiness
-          queueCommand('03');   // DTCs
+          queueCommand('0101');
+          queueCommand('03');
+          queueCommand('0902'); // VIN
+          queueCommand('012F'); // Fuel Level Input
+          queueCommand('015C'); // Engine Oil Temp
         }
       }
     }, 1000); // Poll every second
@@ -1013,7 +1082,7 @@ export default function App() {
   const handleDemoLogin = () => {
     setUser({
       uid: 'demo-user',
-      email: 'guest@drivelogic.ai',
+      email: 'guest@gpsroutelogic.ai',
       displayName: 'Guest Driver',
       isDemo: true
     } as any);
@@ -1144,6 +1213,33 @@ export default function App() {
         </div>
       </motion.header>
 
+      {/* Top Navigation */}
+      <nav className="bg-car-card/80 backdrop-blur-xl border-b border-white/5 p-2 flex justify-around items-center z-40">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                "flex flex-col items-center gap-1 p-2 transition-all duration-300 rounded-xl flex-1 relative",
+                isActive ? "text-car-accent bg-car-accent/5" : "text-white/40 hover:text-white/60"
+              )}
+            >
+              <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+              <span className="text-[10px] font-medium uppercase tracking-wider">{tab.id}</span>
+              {isActive && (
+                <motion.div 
+                  layoutId="activeTab"
+                  className="absolute -bottom-2 w-1 h-1 bg-car-accent rounded-full"
+                />
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
       {criticalTasks.length > 0 && (
         <div 
           onClick={() => setActiveTab('maintenance')}
@@ -1158,7 +1254,7 @@ export default function App() {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pb-24">
+      <main className="flex-1 overflow-y-auto pb-6">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -1226,6 +1322,9 @@ export default function App() {
                 }}
               />
             )}
+            {activeTab === 'subscription' && (
+              <SubscriptionTab />
+            )}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -1245,6 +1344,115 @@ export default function App() {
         isSimulation={isSimulation}
         onSetSimulation={setIsSimulation}
       />
+
+      <AIChatbot isOpen={isChatbotOpen} onClose={() => setIsChatbotOpen(false)} userId={user?.uid} />
+      
+      <button 
+        onClick={() => setIsChatbotOpen(true)}
+        className="fixed bottom-24 right-20 z-40 w-12 h-12 rounded-full bg-car-accent text-white shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
+      >
+        <BrainCircuit className="w-6 h-6" />
+      </button>
+
+      <AnimatePresence>
+        {showTripSummary && completedTripSummary && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="w-full max-w-sm glass-card rounded-3xl p-6 shadow-2xl border border-white/10 relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-car-accent to-car-purple"></div>
+              
+              <div className="flex justify-between items-center mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/5 rounded-xl">
+                    <Activity className="text-car-accent" size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-white">Trip Summary</h2>
+                    <p className="text-[10px] text-white/50 font-mono mt-0.5">
+                      {new Date(completedTripSummary.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - {new Date(completedTripSummary.endTime!).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowTripSummary(false)}
+                  className="p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors text-white/50 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="bg-black/40 p-4 rounded-2xl border border-white/5 text-center">
+                  <div className="text-[9px] uppercase tracking-widest text-white/40 mb-1.5 font-mono">Total Distance</div>
+                  <div className="text-2xl font-bold text-white font-mono">
+                    {completedTripSummary.distance.toFixed(1)} <span className="text-sm text-white/50 font-sans">mi</span>
+                  </div>
+                </div>
+                <div className="bg-black/40 p-4 rounded-2xl border border-white/5 text-center">
+                  <div className="text-[9px] uppercase tracking-widest text-white/40 mb-1.5 font-mono">Avg Speed</div>
+                  <div className="text-2xl font-bold text-white font-mono">
+                    {(() => {
+                      const hours = (completedTripSummary.endTime! - completedTripSummary.startTime) / (1000 * 60 * 60);
+                      const speed = hours > 0 ? completedTripSummary.distance / hours : 0;
+                      return Math.min(speed, 120).toFixed(0);
+                    })()} <span className="text-sm text-white/50 font-sans">mph</span>
+                  </div>
+                </div>
+                <div className="bg-black/40 p-3 rounded-2xl border border-white/5 text-center">
+                  <div className="text-[9px] uppercase tracking-widest text-white/40 mb-1 font-mono">Start Weather</div>
+                  <div className="text-sm font-medium text-white truncate px-2">{completedTripSummary.startWeather || 'N/A'}</div>
+                </div>
+                <div className="bg-black/40 p-3 rounded-2xl border border-white/5 text-center">
+                  <div className="text-[9px] uppercase tracking-widest text-white/40 mb-1 font-mono">End Weather</div>
+                  <div className="text-sm font-medium text-white truncate px-2">{completedTripSummary.endWeather || 'N/A'}</div>
+                </div>
+              </div>
+
+              <div className="space-y-3 mb-8">
+                <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/60 mb-3 font-mono flex items-center gap-2">
+                  <AlertTriangle size={12} className="text-car-warning" /> 
+                  Harsh Events
+                </h3>
+                {completedTripSummary.events.length === 0 ? (
+                  <div className="p-3 bg-car-success/10 border border-car-success/20 rounded-xl flex items-center justify-center gap-2">
+                    <span className="text-car-success text-xs font-medium">Perfect Trip! No harsh events detected.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                    {completedTripSummary.events.map((e, i) => (
+                      <div key={i} className="p-3 bg-white/5 border border-white/10 rounded-xl flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle size={14} className="text-car-warning" />
+                          <span className="text-xs text-white capitalize">{e.type.replace('_', ' ')}</span>
+                        </div>
+                        <span className="text-[10px] bg-black/40 px-2 py-1 rounded-full text-white/60 font-mono border border-white/5">
+                          Severity: {Math.round(e.severity)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button 
+                onClick={() => setShowTripSummary(false)}
+                className="w-full py-3.5 bg-white text-black text-sm font-bold uppercase tracking-wider rounded-xl hover:bg-gray-200 transition-colors"
+              >
+                Close Summary
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Settings Modal */}
       <AnimatePresence>
@@ -1277,23 +1485,6 @@ export default function App() {
               </div>
 
               <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <label className="text-[10px] uppercase tracking-widest text-white/40 font-mono flex items-center gap-2">
-                      <Key size={10} />
-                      Gemini API Key
-                    </label>
-                  </div>
-                  <input 
-                    type="password"
-                    value={apiKeys.gemini}
-                    onChange={(e) => setApiKeys(prev => ({ ...prev, gemini: e.target.value }))}
-                    placeholder="Enter Gemini API Key"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-car-accent transition-colors"
-                  />
-                  <p className="text-[8px] text-white/20">Default: Environment Variable</p>
-                </div>
-
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <label className="text-[10px] uppercase tracking-widest text-white/40 font-mono flex items-center gap-2">
@@ -1396,7 +1587,7 @@ export default function App() {
                           <div className="text-center py-4 text-xs text-white/30 font-mono">Loading files from Drive...</div>
                         ) : driveBackups.length === 0 ? (
                           <div className="text-center py-4 text-[10px] text-white/30 italic bg-black/20 rounded-lg border border-white/5">
-                            No DriveLogic backups found on Google Drive.
+                            No GPS Route Logic backups found on Google Drive.
                           </div>
                         ) : (
                           <div className="space-y-1 max-h-[140px] overflow-y-auto pr-1 custom-scrollbar">
@@ -1561,33 +1752,6 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-car-card/80 backdrop-blur-xl border-t border-white/5 p-2 flex justify-around items-center z-50">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                "flex flex-col items-center gap-1 p-2 transition-all duration-300 rounded-xl flex-1",
-                isActive ? "text-car-accent bg-car-accent/5" : "text-white/40 hover:text-white/60"
-              )}
-            >
-              <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
-              <span className="text-[10px] font-medium uppercase tracking-wider">{tab.id}</span>
-              {isActive && (
-                <motion.div 
-                  layoutId="activeTab"
-                  className="absolute -top-2 w-1 h-1 bg-car-accent rounded-full"
-                />
-              )}
-            </button>
-          );
-        })}
-      </nav>
     </div>
     </APIProvider>
   );

@@ -143,9 +143,9 @@ export default function OBDTab({
     setDriveBackupStatus('saving');
     setDriveBackupError(null);
     try {
-      const name = `drivelogic_diagnosis_${new Date().toISOString().slice(0, 10)}_${Date.now()}.md`;
+      const name = `gpsroutelogic_diagnosis_${new Date().toISOString().slice(0, 10)}_${Date.now()}.md`;
       const reportContent = `
-# DriveLogicAI Vehicle Diagnosis Report
+# GPS Route Logic Vehicle Diagnosis Report
 **Date:** ${new Date().toLocaleString()}
 **Mileage:** ${totalMileage ? totalMileage.toLocaleString() : 'N/A'} miles
 

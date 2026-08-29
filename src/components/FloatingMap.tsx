@@ -251,7 +251,7 @@ export default function FloatingMap({ navigation, setNavigation, mapsApiKey, isL
         },
         (err) => {
           console.warn("Geolocation failed or denied, using fallback coordinates:", err);
-          const fallbackPos = { lat: 37.7749, lng: -122.4194 };
+          const fallbackPos = { lat: 42.1065, lng: -75.9526 };
           setLocation(fallbackPos);
         },
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 5000 }
@@ -372,7 +372,7 @@ export default function FloatingMap({ navigation, setNavigation, mapsApiKey, isL
             )}
             
             <Map
-              defaultCenter={location || { lat: 37.7749, lng: -122.4194 }}
+              defaultCenter={location || { lat: 42.1065, lng: -75.9526 }}
               defaultZoom={isMini ? 13 : 15}
               gestureHandling={'greedy'}
               disableDefaultUI={true}

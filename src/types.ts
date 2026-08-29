@@ -46,6 +46,8 @@ export interface Trip {
   averageDamageScore: number;
   damageHistory: DamagePoint[];
   distance: number;
+  startWeather?: string;
+  endWeather?: string;
 }
 
 export interface DamagePoint {

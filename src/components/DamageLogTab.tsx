@@ -104,7 +104,7 @@ export default function DamageLogTab({ score, history, sensorHistory, trips, isR
     setDriveBackupStatus('saving');
     setDriveBackupError(null);
     try {
-      const name = `drivelogic_trips_backup_${new Date().toISOString().slice(0, 10)}_${Date.now()}.json`;
+      const name = `gpsroutelogic_trips_backup_${new Date().toISOString().slice(0, 10)}_${Date.now()}.json`;
       const content = JSON.stringify(trips, null, 2);
       await createDriveFile(googleAccessToken, name, 'application/json', content);
       setDriveBackupStatus('success');

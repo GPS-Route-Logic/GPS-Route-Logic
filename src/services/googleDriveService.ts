@@ -67,10 +67,10 @@ export async function createDriveFile(
 }
 
 /**
- * Lists files created by DriveLogicAI in Google Drive.
+ * Lists files created by GPS Route Logic in Google Drive.
  */
 export async function listDriveFiles(accessToken: string): Promise<GoogleDriveFile[]> {
-  const q = encodeURIComponent("name contains 'drivelogic' and trashed = false");
+  const q = encodeURIComponent("name contains 'gpsroutelogic' and trashed = false");
   const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,createdTime,size,webViewLink)&orderBy=createdTime%20desc`;
 
   const response = await fetch(url, {
